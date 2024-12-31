@@ -15,6 +15,12 @@
 # Gi = changeT(i-1) / changeD
 # Ai is area at upper boundary of box i
 
+#' @param wtr data frame of water temperatures at measured depths (1,2,3m), requires temperatures at the 'middle' of each box
+#' data are formatted like rLakeAnalyzer (datetime, wtr_*)
+#' @param bathy data frame of depths and areas/volumes, requires bathymetry at the top/bottom of boxes (0.5, 1.5, 2.5 etc.)
+#' interpolated from the 'observations'
+#' @return dataframe of kz values at different depths
+#' 
 ts.kz <- function(wtr, bathy) {
   # message('calculating Kz via gradient heat flux method')
   # Top of the equation -------------
@@ -88,7 +94,7 @@ ts.kz <- function(wtr, bathy) {
                       rate_diffusion,
                       .)) 
   
-  return(Kz_ghf)
+  return(as_tibble(Kz_ghf))
   
 }
 
