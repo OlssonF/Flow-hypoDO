@@ -105,7 +105,7 @@ bathy_int <- bathy |>
 
 # ----------------------------------------#
 
-# EIDC flow data -------------------
+# EIDC inflow data -------------------
 temp <- file.path('data', 'raw_data', 'flowdata.zip')
 exdir <- file.path('data', 'raw_data', 'flowdata') 
 dir.create(exdir, showWarnings = F)
@@ -113,16 +113,36 @@ dir.create(exdir, showWarnings = F)
 download.file("https://data-package.ceh.ac.uk/data/2883aaf1-6148-49cb-904a-d271a028c716.zip", temp)
 unzip(zipfile = temp, exdir = exdir)
 
-flow_dat <- read_csv(file.path(exdir, list.files(exdir, recursive = T, 
+inflow_dat <- read_csv(file.path(exdir, list.files(exdir, recursive = T, 
                                                  pattern = 'elter_inflow_2012-2019.csv')))
 unlink(temp)
 
 # calculate daily inflow data
-flow_dat_daily <- 
-  flow_dat |> 
+inflow_dat_daily <- 
+  inflow_dat |> 
   mutate(datetime = as_date(DateTime)) |> 
   reframe(.by = datetime,
           across(inflow_Q:inflow_T, ~ mean(.x, na.rm = T)))
+
+## Inflow DO estimates -----------------
+inflow_dat_daily_LM <- 
+  inflow_dat_daily |> 
+  select(datetime, inflow_T) |> 
+  rename(wtr = inflow_T)
+
+# using lake metabolizer to estimate the 100% saturation DO concentration based on water temperature
+inflow_dat_daily <- inflow_dat_daily |> 
+  mutate(inflow_DOconc_mgL = LakeMetabolizer::o2.at.sat(inflow_dat_daily_LM)$do.sat, # assume a 100% sat mg/L
+         # use the concentration to estimate the flux (mg s-1)
+         # convert mg L-1 to mg m-3 ( * 1000)
+         # multiply by discharge m3 s-1 ==> flux (mg s-1)
+         inflow_DOflux_mgs = (inflow_DOconc_mgL * 1000) * inflow_Q, 
+         
+         # convert the flux to kg day-1
+         # multiply by s in a day (86400) and divide by 1e6 (mg --> kg)
+         inflow_DOmass_kg = (inflow_DOflux_mgs * 86400) / 1e6) 
+
+
 
 # EIDC phys/chem/bio data -------------
 temp2 <- file.path('data', 'raw_data', 'insitudata.zip')
@@ -165,7 +185,7 @@ kz_daily <- ts.kz(wtr = thermistor_dat_daily,
 ### Nominal intrusion depth --------------------------------
 source('R/inflowD_calculation.R')
 intrusion_depth <- thermistor_dat_daily |> 
-  inner_join(flow_dat_daily, by = 'datetime') |> 
+  inner_join(inflow_dat_daily, by = 'datetime') |> 
   select(-inflow_Q) |> 
   rename(wtr_inflow = inflow_T) |>
   pivot_longer(wtr_1:wtr_6, names_to = 'depth', 
@@ -179,7 +199,7 @@ intrusion_depth <- thermistor_dat_daily |>
 
 ### Density differences--------------------
 density_difference_daily <- thermistor_dat_daily |> 
-  mutate(density_difference = water.density(wtr_1) - water.density(wtr_6)) |> 
+  mutate(density_difference = water.density(wtr_6) - water.density(wtr_1)) |> 
   select(datetime, density_difference)
 #------------------------------------------#
 
@@ -205,3 +225,14 @@ date_metrics <- daily_DO |>
 
 # Combine data -----------------------------
 # Combine all dataframes to be used in analysis
+
+DO_anoxic_periods |> 
+  pivot_wider(names_from = depth, names_prefix = 'DO_',
+              values_from = DO_mgl_daily,
+              id_cols = datetime) |> 
+  left_join(date_metrics) |> 
+  left_join(inflow_dat_daily) |> 
+  left_join(density_difference_daily) |> 
+  left_join(intrusion_depth) |> 
+  left_join(kz_daily) |> 
+  write_csv(file = 'output/all_data.csv')
