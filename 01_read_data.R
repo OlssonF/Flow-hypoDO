@@ -57,21 +57,31 @@ P_day <- expand.grid(datetime=seq(min(daily_DO$datetime),
 
 daily_DO <- full_join(P_day, daily_DO, 
                       by = join_by(datetime, P)) |> 
-  mutate(Depth = factor(P, levels = 1:4, labels = c(0.5,3,5,6))) |> 
-  select(datetime, Depth, DO_mgl_daily, Temp_C_daily)
+  mutate(depth = factor(P, levels = 1:4, labels = c(0.5,3,5,6))) |> 
+  select(datetime, depth, DO_mgl_daily, Temp_C_daily)
 
 # Generate a wide formats needed for some calculations
 wide_daily_DO <- daily_DO %>%
-  pivot_wider(names_from = Depth,
+  pivot_wider(names_from = depth,
               names_prefix = "wtr_", # wtr prefix needed in the lakeanalyzer functions
               values_from = "DO_mgl_daily",
               id_cols = "datetime") 
 
 wide_daily_T <- daily_DO %>%
-  pivot_wider(names_from = Depth,
+  pivot_wider(names_from = depth,
               names_prefix = "wtr_", # wtr prefix needed in the lakeanalyzer functions
               values_from = "Temp_C_daily",
               id_cols = "datetime") 
+
+## Identify the period used for analysis ------------
+# truncate the timeseries so we just have the "summer" period
+# for DO this is defined as when the DO_5 is no longer continuously > 1mg/L.
+source('R/anoxic_period.R')
+anoxic_dates <- calc_anoxic_period(DO = daily_DO)
+
+DO_anoxic_periods <- daily_DO |> 
+  filter(between(datetime, anoxic_dates$start[1], anoxic_dates$end[1])|
+           between(datetime, anoxic_dates$start[2], anoxic_dates$end[2]))
 
 # Hypsometry/bathymetry ------------------
 bathy <- read.delim("data/elter_bathymetry.dat")
@@ -145,7 +155,7 @@ thermistor_dat_daily <-
 
 ## Thermistor data and derived physical metrics ----------
 ### Schmidt stability ------------------------------------
-schmidt_stability_daily <- ts.schmidt.stability(thermistor_dat_daily, bathy = hypso) 
+schmidt_stability_daily <- ts.schmidt.stability(thermistor_dat_daily, bathy = bathy) 
 
 ### Kz (vertical diffusivity)-----------------------------
 source('R/kz_calculation.R')
@@ -154,7 +164,7 @@ kz_daily <- ts.kz(wtr = thermistor_dat_daily,
 
 ### Nominal intrusion depth --------------------------------
 source('R/inflowD_calculation.R')
-thermistor_dat_daily |> 
+intrusion_depth <- thermistor_dat_daily |> 
   inner_join(flow_dat_daily, by = 'datetime') |> 
   select(-inflow_Q) |> 
   rename(wtr_inflow = inflow_T) |>
@@ -184,7 +194,7 @@ strat_dates <- calc_strat_dates(wtr = thermistor_dat_daily,
 
 # Date metrics ----------------------------- 
 # date_metrics <-
-daily_DO |> 
+date_metrics <- daily_DO |> 
   distinct(datetime) |> 
   mutate(doy = yday(datetime),
          year = year(datetime)) |> 
@@ -192,3 +202,6 @@ daily_DO |>
   mutate(n_onset = as.numeric(datetime - start), # days since onset
          n_overturn = as.numeric(end - datetime)) |> # days until overturn
   select(any_of(c('datetime', 'doy', 'year', 'n_onset', 'n_overturn')))
+
+# Combine data -----------------------------
+# Combine all dataframes to be used in analysis
