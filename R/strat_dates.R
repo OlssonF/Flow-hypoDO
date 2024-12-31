@@ -80,5 +80,8 @@ calc_strat_dates <- function(density_diff = 0.1,
     
 
   }
+  strat <- strat |> 
+    mutate(start = as_date(start),
+           end = as_date(end))
   return(strat)
 }
