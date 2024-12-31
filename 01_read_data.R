@@ -52,8 +52,8 @@ daily_DO <- hourly_DO_int |> # use the interpolated hourly data
 
 #get all time, depth combinations
 P_day <- expand.grid(datetime=seq(min(daily_DO$datetime),
-                              max(daily_DO$datetime),
-                              "day"), P=1:4)
+                                  max(daily_DO$datetime),
+                                  "day"), P=1:4)
 
 daily_DO <- full_join(P_day, daily_DO, 
                       by = join_by(datetime, P)) |> 
@@ -114,7 +114,7 @@ download.file("https://data-package.ceh.ac.uk/data/2883aaf1-6148-49cb-904a-d271a
 unzip(zipfile = temp, exdir = exdir)
 
 inflow_dat <- read_csv(file.path(exdir, list.files(exdir, recursive = T, 
-                                                 pattern = 'elter_inflow_2012-2019.csv')))
+                                                   pattern = 'elter_inflow_2012-2019.csv')))
 unlink(temp)
 
 # calculate daily inflow data
@@ -172,6 +172,13 @@ thermistor_dat_daily <-
           across(T_1m:T_6m, ~ mean(.x, na.rm = T))) |> 
   rename(any_of(thermistor_cols)) # rename columns for rlakeanalyzer
 
+# write for lhfa
+thermistor_dat |> 
+  mutate(dateTime = format(DateTime, "%Y-%m-%d %H:%M")) |> 
+  rename(temp1 = T_1m) |> 
+  select(any_of(c('dateTime', 'temp1'))) |> 
+  write_delim(file = 'data/lhfa/Elterwater.wtr',
+              quote = "none")
 ## Derived physical metrics ---------------
 ### Schmidt stability ------------------------------------
 schmidt_stability_daily <- ts.schmidt.stability(thermistor_dat_daily, bathy = bathy) 
@@ -230,21 +237,21 @@ unzip(zipfile = temp4, exdir = exdir4)
 unzip(zipfile = temp5, exdir = exdir5)
 
 met_dat_2018 <- read_csv(file.path(exdir3, list.files(exdir3, recursive = T, 
-                                                        pattern = 'blel-2016_2017_2018.csv')),
-                    skip = 2, 
-                    col_names = c('datetime','wtr_0.5', 'wtr_1','wtr_2','wtr_3','wtr_4','wtr_5','wtr_6',
-                                  'wtr_7','wtr_8','wtr_9','wtr_10','wtr_12', 'at', 'sw', 'ws')) |> 
+                                                      pattern = 'blel-2016_2017_2018.csv')),
+                         skip = 2, 
+                         col_names = c('datetime','wtr_0.5', 'wtr_1','wtr_2','wtr_3','wtr_4','wtr_5','wtr_6',
+                                       'wtr_7','wtr_8','wtr_9','wtr_10','wtr_12', 'airT', 'sw', 'wnd')) |> 
   mutate(datetime = dmy_hm(datetime)) |> 
-  select(datetime, at, sw, ws) |> 
+  select(datetime, airT, sw, wnd) |> 
   filter(year(datetime) == 2018)
 
 met_dat_2019 <- read_csv(file.path(exdir4, list.files(exdir4, recursive = T, 
                                                       pattern = 'blel-2019.csv')),
                          skip = 2, 
                          col_names = c('datetime','wtr_0.5', 'wtr_1','wtr_2','wtr_3','wtr_4','wtr_5','wtr_6',
-                                       'wtr_7','wtr_8','wtr_9','wtr_10','wtr_12', 'at', 'sw', 'ws'))  |> 
+                                       'wtr_7','wtr_8','wtr_9','wtr_10','wtr_12', 'airT', 'sw', 'wnd'))  |> 
   mutate(datetime = dmy_hm(datetime)) |> 
-  select(datetime, at, sw, ws) |> 
+  select(datetime, airT, sw, wnd) |> 
   filter(year(datetime) == 2019)
 
 
@@ -258,14 +265,30 @@ rh_2018_2019 <- read_csv(file.path(exdir5, list.files(exdir5, recursive = T,
   select(datetime, rh)
 
 # combine the dataframes from 2018, 2019, and the rh dataset
-met_dat<- bind_rows(met_dat_2018, met_dat_2019) |> 
-  full_join(rh_2018_2019)
+met_dat <- bind_rows(met_dat_2018, met_dat_2019) |> 
+  full_join(rh_2018_2019) |> 
+  # simple QAQC
+  mutate(sw = ifelse(sw < 0, 0, sw),
+         wnd = ifelse(wnd < 0, 0, wnd))
 
 unlink(temp3)
 unlink(temp4)
 unlink(temp5)
 
-# Combine the met data from 2018
+# Export the met data for use in MATLAB Lake Heat Flux Analyzer
+vars <- c('airT', 'sw', 'wnd', 'rh')
+
+for (var in vars) {
+  met_dat |> 
+    mutate(dateTime = format(datetime, "%Y-%m-%d %H:%M")) |> 
+    select(any_of(c('dateTime', var))) |> 
+    write_delim(file = paste0('data/lhfa/Elterwater.',var),
+                quote = "none")
+}
+
+
+
+
 # Date metrics ----------------------------- 
 # date_metrics <-
 date_metrics <- daily_DO |> 
