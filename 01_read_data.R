@@ -11,7 +11,7 @@ library(rLakeAnalyzer)
 # DO data -----------------
 # read in the QC-ed data, raw data that has uneven timesteps, roughly every 15 minutes
 DO_dat <- read_csv("data/DO_QC.csv") |> 
-  mutate(DateTime = ymd_hms(DateTime))
+  mutate(DateTime = ymd_hms(DateTime)) 
 
 # calculate the hourly average DO at each depth
 hourly_DO <- DO_dat  |> 
@@ -40,8 +40,8 @@ hourly_DO_int <- hourly_DO |>
 
 # Calculate daily average DO
 daily_DO <- hourly_DO_int |> # use the interpolated hourly data
-  mutate(Date = ymd(format(Hour, "%y-%m-%d"))) |> # round the hour to get an average
-  group_by(P, Date) |>
+  mutate(datetime = ymd(format(Hour, "%y-%m-%d"))) |> # round the hour to get an average
+  group_by(P, datetime) |>
   summarise(DO_mgl_daily = mean(DO_mgl, na.rm = T),  # mean DO
             Temp_C_daily = mean(Temp_C, na.rm = T), # mean temperature
             n_DO = sum(!(is.na(DO_mgl))) # count the non-NA values
@@ -51,26 +51,27 @@ daily_DO <- hourly_DO_int |> # use the interpolated hourly data
                                NA, DO_mgl_daily)) # set this to NA
 
 #get all time, depth combinations
-P_day <- expand.grid(Date=seq(min(daily_DO$Date),
-                              max(daily_DO$Date),
+P_day <- expand.grid(datetime=seq(min(daily_DO$datetime),
+                              max(daily_DO$datetime),
                               "day"), P=1:4)
 
-daily_DO <- full_join(P_day, daily_DO, by = join_by(Date, P)) |> 
+daily_DO <- full_join(P_day, daily_DO, 
+                      by = join_by(datetime, P)) |> 
   mutate(Depth = factor(P, levels = 1:4, labels = c(0.5,3,5,6))) |> 
-  select(Date, Depth, DO_mgl_daily, Temp_C_daily)
+  select(datetime, Depth, DO_mgl_daily, Temp_C_daily)
 
 # Generate a wide formats needed for some calculations
 wide_daily_DO <- daily_DO %>%
   pivot_wider(names_from = Depth,
               names_prefix = "wtr_", # wtr prefix needed in the lakeanalyzer functions
               values_from = "DO_mgl_daily",
-              id_cols = "Date") 
+              id_cols = "datetime") 
 
 wide_daily_T <- daily_DO %>%
   pivot_wider(names_from = Depth,
               names_prefix = "wtr_", # wtr prefix needed in the lakeanalyzer functions
               values_from = "Temp_C_daily",
-              id_cols = "Date") 
+              id_cols = "datetime") 
 
 # Hypsometry/bathymetry ------------------
 bathy <- read.delim("data/elter_bathymetry.dat")
@@ -166,4 +167,16 @@ thermistor_dat_daily |>
                                     inflowT = wtr_inflow))
 # ---------------------------------------#
 
+### Density differences--------------------
+density_difference_daily <- thermistor_dat_daily |> 
+  mutate(density_difference = water.density(wtr_1) - water.density(wtr_6)) |> 
+  select(datetime, density_difference)
+#------------------------------------------#
 
+### Stratification distance ---------------
+# Time since/before onset/overturn
+source('R/strat_dates.R')
+strat_dates <- calc_strat_dates(wtr = thermistor_dat_daily, 
+                                use_depths = c(1,6), 
+                                density_diff = 0.1)
+#-----------------------------------------#
