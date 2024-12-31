@@ -105,7 +105,7 @@ bathy_int <- bathy |>
 
 # ----------------------------------------#
 
-# EIDC inflow data -------------------
+# Inflow data (EIDC) -------------------
 temp <- file.path('data', 'raw_data', 'flowdata.zip')
 exdir <- file.path('data', 'raw_data', 'flowdata') 
 dir.create(exdir, showWarnings = F)
@@ -144,7 +144,7 @@ inflow_dat_daily <- inflow_dat_daily |>
 
 
 
-# EIDC phys/chem/bio data -------------
+# Thermistor data (EIDC) -------------
 temp2 <- file.path('data', 'raw_data', 'insitudata.zip')
 exdir2 <- file.path('data', 'raw_data', 'insitudata') 
 dir.create(exdir2, showWarnings = F)
@@ -172,8 +172,7 @@ thermistor_dat_daily <-
           across(T_1m:T_6m, ~ mean(.x, na.rm = T))) |> 
   rename(any_of(thermistor_cols)) # rename columns for rlakeanalyzer
 
-
-## Thermistor data and derived physical metrics ----------
+## Derived physical metrics ---------------
 ### Schmidt stability ------------------------------------
 schmidt_stability_daily <- ts.schmidt.stability(thermistor_dat_daily, bathy = bathy) 
 
@@ -212,6 +211,61 @@ strat_dates <- calc_strat_dates(wtr = thermistor_dat_daily,
 #-----------------------------------------#
 
 
+# Meteorological (EIDC) -------------------
+temp3 <- file.path('data', 'raw_data', 'metdata1.zip')
+temp4 <- file.path('data', 'raw_data', 'metdata2.zip')
+temp5 <- file.path('data', 'raw_data', 'metdata3.zip')
+exdir3 <- file.path('data', 'raw_data', 'metdata1') 
+exdir4 <- file.path('data', 'raw_data', 'metdata2') 
+exdir5 <- file.path('data', 'raw_data', 'metdata3') 
+dir.create(exdir3, showWarnings = F)
+dir.create(exdir4, showWarnings = F)
+dir.create(exdir5, showWarnings = F)
+
+download.file("https://data-package.ceh.ac.uk/data/603629d9-618c-4a26-8a1d-235a4c8f4791.zip", temp3)
+download.file("https://data-package.ceh.ac.uk/data/467942bd-2cd5-4038-bc4f-5d77535d99f1.zip", temp4)
+download.file("https://data-package.ceh.ac.uk/data/3df05e85-2c56-4bd9-9918-44b760e20b2e.zip", temp5)
+unzip(zipfile = temp3, exdir = exdir3)
+unzip(zipfile = temp4, exdir = exdir4)
+unzip(zipfile = temp5, exdir = exdir5)
+
+met_dat_2018 <- read_csv(file.path(exdir3, list.files(exdir3, recursive = T, 
+                                                        pattern = 'blel-2016_2017_2018.csv')),
+                    skip = 2, 
+                    col_names = c('datetime','wtr_0.5', 'wtr_1','wtr_2','wtr_3','wtr_4','wtr_5','wtr_6',
+                                  'wtr_7','wtr_8','wtr_9','wtr_10','wtr_12', 'at', 'sw', 'ws')) |> 
+  mutate(datetime = dmy_hm(datetime)) |> 
+  select(datetime, at, sw, ws) |> 
+  filter(year(datetime) == 2018)
+
+met_dat_2019 <- read_csv(file.path(exdir4, list.files(exdir4, recursive = T, 
+                                                      pattern = 'blel-2019.csv')),
+                         skip = 2, 
+                         col_names = c('datetime','wtr_0.5', 'wtr_1','wtr_2','wtr_3','wtr_4','wtr_5','wtr_6',
+                                       'wtr_7','wtr_8','wtr_9','wtr_10','wtr_12', 'at', 'sw', 'ws'))  |> 
+  mutate(datetime = dmy_hm(datetime)) |> 
+  select(datetime, at, sw, ws) |> 
+  filter(year(datetime) == 2019)
+
+
+rh_2018_2019 <- read_csv(file.path(exdir5, list.files(exdir5, recursive = T, 
+                                                      pattern = 'blel-rh_2012_2019.csv')),
+                         skip = 1,
+                         col_names = c('date', 'hour', 'rh', 'N')) |> 
+  mutate(date = dmy(date)) |> 
+  filter(year(date) %in% c(2018, 2019)) |> 
+  mutate(datetime = ymd_h(paste0(date, hour))) |>
+  select(datetime, rh)
+
+# combine the dataframes from 2018, 2019, and the rh dataset
+met_dat<- bind_rows(met_dat_2018, met_dat_2019) |> 
+  full_join(rh_2018_2019)
+
+unlink(temp3)
+unlink(temp4)
+unlink(temp5)
+
+# Combine the met data from 2018
 # Date metrics ----------------------------- 
 # date_metrics <-
 date_metrics <- daily_DO |> 
