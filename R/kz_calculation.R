@@ -51,7 +51,7 @@ ts.kz <- function(wtr, bathy) {
   # bottom of the equation --------------------
   # temperature gradient between the boxes
   # gradient between each layer divided by the height of the layer (1m)
-  Gi <- data.frame(date = wtr$datetime,
+  Gi <- data.frame(datetime = wtr$datetime,
                    
                    # wtr[,2:6] is wtr_1:wtr_5
                    # wtr[,3:7] is wtr_2:wtr_6
@@ -60,7 +60,7 @@ ts.kz <- function(wtr, bathy) {
   
   # use the boundary values as column names
   # only 1.5 - 5.5m
-  colnames(Gi) <- c("Date", paste0("wtr_", depths_boundaries[-c(1,7)])) 
+  colnames(Gi) <- c("datetime", paste0("wtr_", depths_boundaries[-c(1,7)])) 
   
   
   # areas at boundaries
@@ -71,17 +71,17 @@ ts.kz <- function(wtr, bathy) {
                                          depth = as.numeric(gsub('wtr_', '', cur_column())),
                                          bathy = bathy))) |> 
     # only valid for the deeper layers
-    select(Date, wtr_3.5, wtr_4.5, wtr_5.5)
+    select(datetime, wtr_3.5, wtr_4.5, wtr_5.5)
   
   # message('bottom of calc done')
   
   # final calculation of Kz using the gradient heatflux method -------
   # kz = sum_dT_dt_V / Gi_Ai
-  Kz_ghf <- data.frame(Date = Gi_Ai$Date,
+  Kz_ghf <- data.frame(datetime = Gi_Ai$datetime,
                        #calculate Kz for each layer [-date]
                        sum_dT_dt_Vk[,-1] / Gi_Ai[,-1])
   
-  colnames(Kz_ghf) <- c("Date", paste0("Kz_", gsub("wtr_", "", colnames(Gi_Ai[-1]))))
+  colnames(Kz_ghf) <- c("datetime", paste0("Kz_", gsub("wtr_", "", colnames(Gi_Ai[-1]))))
   
   
   # Kz values cannot be less than the rate of molecular diffusion
