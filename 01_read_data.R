@@ -84,7 +84,7 @@ bathy_int <- bathy |>
   arrange(depths) |> 
   #interpolate the areas
   mutate(areas = ifelse(depths == 6.5, 0, 
-                            na.approx(areas, na.rm = F))) |> 
+                        na.approx(areas, na.rm = F))) |> 
   # then extract the boxes needed and calculate the volume based on these areas
   filter(depths %in% depths_boundaries) |> 
   # calculate the volume of each of these trapeziums
@@ -105,6 +105,13 @@ unzip(zipfile = temp, exdir = exdir)
 flow_dat <- read_csv(file.path(exdir, list.files(exdir, recursive = T, 
                                                  pattern = 'elter_inflow_2012-2019.csv')))
 unlink(temp)
+
+# calculate daily inflow data
+flow_dat_daily <- 
+  flow_dat |> 
+  mutate(datetime = as_date(DateTime)) |> 
+  reframe(.by = datetime,
+          across(inflow_Q:inflow_T, ~ mean(.x, na.rm = T)))
 
 # EIDC phys/chem/bio data -------------
 temp2 <- file.path('data', 'raw_data', 'insitudata.zip')
@@ -136,14 +143,27 @@ thermistor_dat_daily <-
 
 
 ## Thermistor data and derived physical metrics ----------
-daily_thermal_metrics <- ts.schmidt.stability(thermistor_dat_daily, bathy = hypso) |> 
-  full_join(thermistor_dat_daily)
+### Schmidt stability ------------------------------------
+schmidt_stability_daily <- ts.schmidt.stability(thermistor_dat_daily, bathy = hypso) 
 
+### Kz (vertical diffusivity)-----------------------------
 source('R/kz_calculation.R')
+kz_daily <- ts.kz(wtr = thermistor_dat_daily,
+                  bathy = bathy_int) # requires the bathymetry at the interpolate depths
 
+### Nominal intrusion depth --------------------------------
+source('R/inflowD_calculation.R')
+thermistor_dat_daily |> 
+  inner_join(flow_dat_daily, by = 'datetime') |> 
+  select(-inflow_Q) |> 
+  rename(wtr_inflow = inflow_T) |>
+  pivot_longer(wtr_1:wtr_6, names_to = 'depth', 
+               names_prefix = 'wtr_', names_transform = list(depth = as.numeric),
+               values_to = 'temp') |> 
+  reframe(.by = datetime,
+          inflowD = intrusion.depth(wtr = temp,
+                                    depths = depth, 
+                                    inflowT = wtr_inflow))
 # ---------------------------------------#
 
-
-
-# 
 
