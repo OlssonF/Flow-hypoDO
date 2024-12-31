@@ -180,3 +180,15 @@ strat_dates <- calc_strat_dates(wtr = thermistor_dat_daily,
                                 use_depths = c(1,6), 
                                 density_diff = 0.1)
 #-----------------------------------------#
+
+
+# Date metrics ----------------------------- 
+# date_metrics <-
+daily_DO |> 
+  distinct(datetime) |> 
+  mutate(doy = yday(datetime),
+         year = year(datetime)) |> 
+  left_join(strat_dates, by = join_by(year)) |> 
+  mutate(n_onset = as.numeric(datetime - start), # days since onset
+         n_overturn = as.numeric(end - datetime)) |> # days until overturn
+  select(any_of(c('datetime', 'doy', 'year', 'n_onset', 'n_overturn')))
