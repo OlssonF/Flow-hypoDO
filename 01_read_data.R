@@ -8,6 +8,7 @@
 # Packages
 library(tidyverse)
 library(rLakeAnalyzer)
+library(zoo)
 # DO data -----------------
 # read in the QC-ed data, raw data that has uneven timesteps, roughly every 15 minutes
 DO_dat <- read_csv("data/DO_QC.csv") |> 
@@ -79,6 +80,21 @@ wide_daily_T <- daily_DO %>%
 source('R/anoxic_period.R')
 anoxic_dates <- calc_anoxic_period(DO = daily_DO)
 
+all_dates <- bind_rows(data.frame(datetime = seq.Date(anoxic_dates$start[1],
+                                                      anoxic_dates$end[1],
+                                                      'day')),
+                       data.frame(datetime = seq.Date(anoxic_dates$start[2],
+                                                      anoxic_dates$end[2],
+                                                      'day')))
+
+
+all_dates_hourly <- bind_rows(data.frame(datetime = seq(as_datetime(anoxic_dates$start[1]),
+                                                        as_datetime(anoxic_dates$end[1]),
+                                                        'hour')),
+                              data.frame(datetime = seq(as_datetime(anoxic_dates$start[2]),
+                                                        as_datetime(anoxic_dates$end[2]),
+                                                        'hour')))
+
 DO_anoxic_periods <- daily_DO |> 
   filter(between(datetime, anoxic_dates$start[1], anoxic_dates$end[1])|
            between(datetime, anoxic_dates$start[2], anoxic_dates$end[2]))
@@ -110,8 +126,11 @@ temp <- file.path('data', 'raw_data', 'flowdata.zip')
 exdir <- file.path('data', 'raw_data', 'flowdata') 
 dir.create(exdir, showWarnings = F)
 
-download.file("https://data-package.ceh.ac.uk/data/2883aaf1-6148-49cb-904a-d271a028c716.zip", temp)
-unzip(zipfile = temp, exdir = exdir)
+if (!file.exists(exdir)) {
+  download.file("https://data-package.ceh.ac.uk/data/2883aaf1-6148-49cb-904a-d271a028c716.zip", temp)
+  unzip(zipfile = temp, exdir = exdir)  
+}
+
 
 inflow_dat <- read_csv(file.path(exdir, list.files(exdir, recursive = T, 
                                                    pattern = 'elter_inflow_2012-2019.csv')))
@@ -149,8 +168,10 @@ temp2 <- file.path('data', 'raw_data', 'insitudata.zip')
 exdir2 <- file.path('data', 'raw_data', 'insitudata') 
 dir.create(exdir2, showWarnings = F)
 
-download.file("https://data-package.ceh.ac.uk/data/37f17f6c-66f6-454c-bd52-7c601ef20ca2.zip", temp2)
-unzip(zipfile = temp2, exdir = exdir2)
+if (!file.exists(exdir2)) {
+  download.file("https://data-package.ceh.ac.uk/data/37f17f6c-66f6-454c-bd52-7c601ef20ca2.zip", temp2)
+  unzip(zipfile = temp2, exdir = exdir2)  
+}
 
 thermistor_dat <- read_csv(file.path(exdir2, list.files(exdir2, recursive = T, 
                                                         pattern = 'elter_t_profiles_2018-2019.csv')))
@@ -172,12 +193,15 @@ thermistor_dat_daily <-
           across(T_1m:T_6m, ~ mean(.x, na.rm = T))) |> 
   rename(any_of(thermistor_cols)) # rename columns for rlakeanalyzer
 
-# write for lhfa
+# write hourly data for lhfa
 thermistor_dat |> 
+  right_join(all_dates_hourly, by = join_by(DateTime == datetime)) |>  
   mutate(dateTime = format(DateTime, "%Y-%m-%d %H:%M")) |> 
   rename(temp1 = T_1m) |> 
   select(any_of(c('dateTime', 'temp1'))) |> 
-  write_delim(file = 'data/lhfa/Elterwater.wtr',
+  mutate(temp1 = na.approx(temp1)) |> 
+  write_delim(file = 'HeatFluxAnalyzer/data/Elterwater.wtr',
+              delim = '\t',
               quote = "none")
 ## Derived physical metrics ---------------
 ### Schmidt stability ------------------------------------
@@ -186,7 +210,8 @@ schmidt_stability_daily <- ts.schmidt.stability(thermistor_dat_daily, bathy = ba
 ### Kz (vertical diffusivity)-----------------------------
 source('R/kz_calculation.R')
 kz_daily <- ts.kz(wtr = thermistor_dat_daily,
-                  bathy = bathy_int) # requires the bathymetry at the interpolate depths
+                  bathy = bathy_int) |> # requires the bathymetry at the interpolate depths
+  select(datetime, Kz_4.5)
 
 ### Nominal intrusion depth --------------------------------
 source('R/inflowD_calculation.R')
@@ -219,6 +244,7 @@ strat_dates <- calc_strat_dates(wtr = thermistor_dat_daily,
 
 
 # Meteorological (EIDC) -------------------
+library(suntools)
 temp3 <- file.path('data', 'raw_data', 'metdata1.zip')
 temp4 <- file.path('data', 'raw_data', 'metdata2.zip')
 temp5 <- file.path('data', 'raw_data', 'metdata3.zip')
@@ -229,12 +255,20 @@ dir.create(exdir3, showWarnings = F)
 dir.create(exdir4, showWarnings = F)
 dir.create(exdir5, showWarnings = F)
 
-download.file("https://data-package.ceh.ac.uk/data/603629d9-618c-4a26-8a1d-235a4c8f4791.zip", temp3)
-download.file("https://data-package.ceh.ac.uk/data/467942bd-2cd5-4038-bc4f-5d77535d99f1.zip", temp4)
-download.file("https://data-package.ceh.ac.uk/data/3df05e85-2c56-4bd9-9918-44b760e20b2e.zip", temp5)
-unzip(zipfile = temp3, exdir = exdir3)
-unzip(zipfile = temp4, exdir = exdir4)
-unzip(zipfile = temp5, exdir = exdir5)
+if (!file.exists(exdir3)) {
+  download.file("https://data-package.ceh.ac.uk/data/603629d9-618c-4a26-8a1d-235a4c8f4791.zip", temp3)
+  unzip(zipfile = temp3, exdir = exdir3)  
+}
+
+if (!file.exists(exdir)) {
+  download.file("https://data-package.ceh.ac.uk/data/467942bd-2cd5-4038-bc4f-5d77535d99f1.zip", temp4)
+  unzip(zipfile = temp4, exdir = exdir4)  
+}
+
+if (!file.exists(exdir5)) {
+  download.file("https://data-package.ceh.ac.uk/data/3df05e85-2c56-4bd9-9918-44b760e20b2e.zip", temp5)
+  unzip(zipfile = temp5, exdir = exdir5)  
+}
 
 met_dat_2018 <- read_csv(file.path(exdir3, list.files(exdir3, recursive = T, 
                                                       pattern = 'blel-2016_2017_2018.csv')),
@@ -258,11 +292,11 @@ met_dat_2019 <- read_csv(file.path(exdir4, list.files(exdir4, recursive = T,
 rh_2018_2019 <- read_csv(file.path(exdir5, list.files(exdir5, recursive = T, 
                                                       pattern = 'blel-rh_2012_2019.csv')),
                          skip = 1,
-                         col_names = c('date', 'hour', 'rh', 'N')) |> 
+                         col_names = c('date', 'hour', 'RH', 'N')) |> 
   mutate(date = dmy(date)) |> 
   filter(year(date) %in% c(2018, 2019)) |> 
   mutate(datetime = ymd_h(paste0(date, hour))) |>
-  select(datetime, rh)
+  select(datetime, RH)
 
 # combine the dataframes from 2018, 2019, and the rh dataset
 met_dat <- bind_rows(met_dat_2018, met_dat_2019) |> 
@@ -275,19 +309,71 @@ unlink(temp3)
 unlink(temp4)
 unlink(temp5)
 
+
+# Do some QA/QC
+long_lat <- matrix(c( -3.0350, 54.4287), nrow = 1)
+check_dates <- as.POSIXct(unique(format(met_dat$datetime, "%Y-%m-%d")), tz = 'GMT')
+sunrise <- suntools::sunriset(crds = long_lat,
+                              dateTime = check_dates,
+                              direction = 'sunrise',
+                              POSIXct.out = T)[2] |>
+  rename(sunrise = time) |> 
+  mutate(date = as_date(format(sunrise, "%Y-%m-%d")))
+
+sunset <- suntools::sunriset(crds = long_lat,
+                             dateTime = check_dates,
+                             direction = 'sunset',
+                             POSIXct.out = T)[2] |> 
+  rename(sunset = time) |> 
+  mutate(date = as_date(format(sunset, "%Y-%m-%d")))
+
+
+# check that the sw is 0 between sunrise and sunset
+met_dat <- met_dat |> 
+  mutate(date = as_date(datetime)) |> 
+  full_join(sunrise, by = join_by(date), relationship = 'many-to-many') |> 
+  full_join(sunset, by = join_by(date), relationship = 'many-to-many') |> 
+  # set sw to zero if it's nighttime
+  mutate(sw = ifelse(between(datetime, sunrise, sunset), sw, 0)) |> 
+  select(datetime, airT, sw, wnd, RH)
+
+
 # Export the met data for use in MATLAB Lake Heat Flux Analyzer
-vars <- c('airT', 'sw', 'wnd', 'rh')
+vars <- c('airT', 'sw', 'wnd', 'RH')
 
 for (var in vars) {
   met_dat |> 
+    right_join(all_dates_hourly) |> 
     mutate(dateTime = format(datetime, "%Y-%m-%d %H:%M")) |> 
     select(any_of(c('dateTime', var))) |> 
-    write_delim(file = paste0('data/lhfa/Elterwater.',var),
+    mutate(across(all_of(var), na.approx, .names = var)) |> 
+    
+    head(n = 20) |> 
+    write_delim(file = paste0('HeatFluxAnalyzer/data/Elterwater.',var),
+                delim = '\t',
                 quote = "none")
 }
 
+# THIS NEXT STEP NEEDS TO BE RUN IN MATLAB! ---------------
+#   THE SCRIPT IS AVAILABLE IN THE SUBDIRECTORY ("./HeatFluxAnalyzer/run_lhfa.m")
+#   The directory contains the configuration files (.hfx) and the matlab code to run LHFA
 
+# This generates a .txt file with the output that we now read in. 
+lhfa_daily <- read_delim('HeatFluxAnalyzer/data/Elterwater_results.txt', delim = '\t') 
 
+# simplify column names
+colnames(lhfa_daily) <- str_split_i(colnames(lhfa_daily), pattern = ' ', i = 1)
+
+lhfa_daily <- lhfa_daily |> 
+  select(DateTime,
+         u10, # wind speed at 10 m
+         Qtot, # total surface heat flux
+         C_D10) |>  # transfer coefficient of momentum at 10 m
+  mutate(P10 = C_D10 * 1.2 * (u10^3),
+         # calculate windpower
+         # C_D (transfer coefficient) * 1.2 (density of air) * cube of the wind
+         datetime = ymd(format(DateTime, "%Y-%m-%d"))) |> 
+  select(datetime, P10, Qtot)
 
 # Date metrics ----------------------------- 
 # date_metrics <-
@@ -307,9 +393,12 @@ DO_anoxic_periods |>
   pivot_wider(names_from = depth, names_prefix = 'DO_',
               values_from = DO_mgl_daily,
               id_cols = datetime) |> 
-  left_join(date_metrics) |> 
-  left_join(inflow_dat_daily) |> 
-  left_join(density_difference_daily) |> 
-  left_join(intrusion_depth) |> 
-  left_join(kz_daily) |> 
+  select(-DO_0.5, -DO_6) |> 
+  left_join(date_metrics, by = join_by(datetime)) |> 
+  left_join(inflow_dat_daily, by = join_by(datetime)) |> 
+  left_join(density_difference_daily, by = join_by(datetime)) |> 
+  left_join(intrusion_depth, by = join_by(datetime)) |> 
+  left_join(kz_daily, by = join_by(datetime)) |> 
+  left_join(lhfa_daily, by = join_by(datetime)) |>
+  left_join(schmidt_stability_daily, by = join_by(datetime)) |> 
   write_csv(file = 'output/all_data.csv')
